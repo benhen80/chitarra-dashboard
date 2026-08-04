@@ -466,6 +466,31 @@
   }
   .log-panel .panel-label{ margin-bottom:14px; }
 
+  .log-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:6px;
+  }
+  .log-actions{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  button.small{
+    padding:7px 12px;
+    font-size:12px;
+  }
+  .log-status{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color:var(--amp-green-bright);
+    min-height:16px;
+    margin-bottom:10px;
+  }
+
   .exercise-form{
     display:flex;
     gap:8px;
@@ -676,7 +701,16 @@
     <!-- EXERCISE LOG -->
     <section class="panel log-panel" aria-label="Esercizi">
       <div class="screw-tr"></div><div class="screw-bl"></div>
-      <div class="panel-label">Esercizi di oggi</div>
+
+      <div class="log-header">
+        <div class="panel-label" style="margin-bottom:0;">Esercizi di oggi</div>
+        <div class="log-actions">
+          <button type="button" class="btn-ghost small" id="exportBtn">Esporta lista</button>
+          <button type="button" class="btn-ghost small" id="importBtn">Importa lista</button>
+          <input type="file" id="importFile" accept="application/json" hidden>
+        </div>
+      </div>
+      <div class="log-status" id="logStatus">&nbsp;</div>
 
       <form class="exercise-form" id="exerciseForm">
         <input type="text" id="exerciseInput" placeholder="Es. Scale pentatoniche in La, arpeggi, pezzo nuovo…" maxlength="80">
@@ -1012,6 +1046,17 @@
   const exerciseDate = document.getElementById('exerciseDate');
   const exerciseList = document.getElementById('exerciseList');
   const emptyHint = document.getElementById('emptyHint');
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const importFile = document.getElementById('importFile');
+  const logStatus = document.getElementById('logStatus');
+  let logStatusTimer = null;
+
+  function setLogStatus(msg){
+    logStatus.textContent = msg;
+    clearTimeout(logStatusTimer);
+    logStatusTimer = setTimeout(()=>{ logStatus.textContent = '\u00a0'; }, 5000);
+  }
 
   function todayISO(){
     const d = new Date();
@@ -1112,6 +1157,59 @@
     exerciseInput.focus();
     renderExercises();
     saveExercises();
+  });
+
+  exportBtn.addEventListener('click', ()=>{
+    if(!exercises.length){
+      setLogStatus('Nessun esercizio da esportare.');
+      return;
+    }
+    const dataStr = JSON.stringify(exercises, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `esercizi-chitarra-${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setLogStatus('Lista esportata.');
+  });
+
+  importBtn.addEventListener('click', ()=>{
+    importFile.click();
+  });
+
+  importFile.addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      try{
+        const imported = JSON.parse(ev.target.result);
+        if(!Array.isArray(imported)) throw new Error('formato non valido');
+        const existingKeys = new Set(exercises.map(ex => ex.name + '|' + ex.date));
+        let added = 0;
+        imported.forEach(item => {
+          if(item && typeof item.name === 'string' && typeof item.date === 'string'){
+            const key = item.name + '|' + item.date;
+            if(!existingKeys.has(key)){
+              exercises.push({ id: idCounter++, name: item.name, date: item.date, done: !!item.done });
+              existingKeys.add(key);
+              added++;
+            }
+          }
+        });
+        renderExercises();
+        saveExercises();
+        setLogStatus(added > 0 ? `Importati ${added} esercizi.` : 'Nessun nuovo esercizio da importare (già presenti).');
+      }catch(err){
+        setLogStatus('File non valido: usa un file esportato da questa dashboard.');
+      }
+      importFile.value = '';
+    };
+    reader.readAsText(file);
   });
 
   loadExercises();
