@@ -491,6 +491,80 @@
     margin-bottom:10px;
   }
 
+  .log-filter{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    margin:2px 0 14px;
+  }
+  .log-filter label{
+    font-size:12px;
+    color:var(--muted);
+  }
+  .log-stats{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color:var(--muted);
+    margin-left:auto;
+  }
+
+  .ex-badge{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10px;
+    letter-spacing:0.03em;
+    text-transform:uppercase;
+    padding:3px 8px;
+    border-radius:999px;
+    border:1px solid;
+    white-space:nowrap;
+    flex-shrink:0;
+  }
+
+  .ex-stars{
+    display:flex;
+    gap:2px;
+    flex-shrink:0;
+  }
+  .ex-stars .star{
+    background:none;
+    border:none;
+    cursor:pointer;
+    font-size:15px;
+    line-height:1;
+    padding:2px;
+    color:rgba(237,224,200,0.2);
+  }
+  .ex-stars .star.filled{
+    color:var(--brass);
+  }
+  .ex-stars .star:hover{
+    color:var(--brass);
+    filter:brightness(1.2);
+  }
+
+  .ex-bpm-btn{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    background:rgba(201,162,39,0.08);
+    color:var(--muted);
+    border:1px solid rgba(201,162,39,0.25);
+    border-radius:6px;
+    padding:5px 9px;
+    cursor:pointer;
+    white-space:nowrap;
+    flex-shrink:0;
+  }
+  .ex-bpm-btn.set{
+    color:var(--brass);
+    border-color:var(--brass);
+    background:rgba(201,162,39,0.14);
+    font-weight:700;
+  }
+  .ex-bpm-btn:hover{
+    filter:brightness(1.15);
+  }
+
   .exercise-form{
     display:flex;
     gap:8px;
@@ -548,6 +622,7 @@
     background:rgba(0,0,0,0.18);
     border-radius:6px;
     border:1px solid rgba(237,224,200,0.07);
+    flex-wrap:wrap;
   }
   .exercise-list li.done{ opacity:0.5; }
   .exercise-list li.done .ex-name{ text-decoration:line-through; }
@@ -715,8 +790,15 @@
       <form class="exercise-form" id="exerciseForm">
         <input type="text" id="exerciseInput" placeholder="Es. Scale pentatoniche in La, arpeggi, pezzo nuovo…" maxlength="80">
         <input type="date" id="exerciseDate" aria-label="Data">
+        <select id="exerciseCategory" class="sig-select" aria-label="Tipologia"></select>
         <button type="submit" class="btn-brass">Aggiungi</button>
       </form>
+
+      <div class="log-filter">
+        <label for="categoryFilter">Filtra per tipologia</label>
+        <select id="categoryFilter" class="sig-select"></select>
+        <span class="log-stats" id="logStats"></span>
+      </div>
 
       <ul class="exercise-list" id="exerciseList"></ul>
       <div class="empty-hint" id="emptyHint">Aggiungi il primo esercizio da lavorare in questa sessione.</div>
@@ -1044,13 +1126,103 @@
   const exerciseForm = document.getElementById('exerciseForm');
   const exerciseInput = document.getElementById('exerciseInput');
   const exerciseDate = document.getElementById('exerciseDate');
+  const exerciseCategory = document.getElementById('exerciseCategory');
+  const categoryFilter = document.getElementById('categoryFilter');
   const exerciseList = document.getElementById('exerciseList');
   const emptyHint = document.getElementById('emptyHint');
   const exportBtn = document.getElementById('exportBtn');
   const importBtn = document.getElementById('importBtn');
   const importFile = document.getElementById('importFile');
   const logStatus = document.getElementById('logStatus');
+  const logStats = document.getElementById('logStats');
   let logStatusTimer = null;
+
+  const BUILTIN_CATEGORIES = {
+    tecnica:          { label: 'Tecnica',          color: '#c9a227' },
+    scale:            { label: 'Scale',             color: '#4f7a5b' },
+    arpeggi:          { label: 'Arpeggi',           color: '#c1443b' },
+    accordi:          { label: 'Accordi',           color: '#4a7a9a' },
+    ritmica:          { label: 'Ritmica',           color: '#b5651d' },
+    teoria:           { label: 'Teoria',            color: '#8a6bb5' },
+    repertorio:       { label: 'Repertorio',        color: '#a68a5b' },
+    improvvisazione:  { label: 'Improvvisazione',   color: '#cf8a2e' },
+    altro:            { label: 'Altro',             color: '#8a7d63' }
+  };
+  const CUSTOM_COLOR_POOL = ['#5a8f7b','#9a5a8f','#5a7a9f','#9f7a5a','#7a9f5a','#9f5a5a','#5a9f9f','#8f5a9f'];
+
+  let CATEGORIES = { ...BUILTIN_CATEGORIES };
+  let customCategories = {};
+
+  function categoryInfo(id){
+    return CATEGORIES[id] || CATEGORIES.altro;
+  }
+
+  function hexToRgb(hex){
+    const h = hex.replace('#','');
+    const bigint = parseInt(h, 16);
+    return `${(bigint >> 16) & 255}, ${(bigint >> 8) & 255}, ${bigint & 255}`;
+  }
+
+  function slugify(str){
+    const base = str.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+    return base || ('tipo-' + Date.now());
+  }
+
+  function populateCategorySelects(){
+    const entries = Object.entries(CATEGORIES);
+    const optionsHtml = entries.map(([id, info]) =>
+      `<option value="${id}">${info.label}</option>`
+    ).join('');
+
+    const prevExVal = exerciseCategory.value;
+    exerciseCategory.innerHTML = optionsHtml + `<option value="__new__">➕ Nuova tipologia…</option>`;
+    if(prevExVal && CATEGORIES[prevExVal]) exerciseCategory.value = prevExVal;
+
+    const prevFilterVal = categoryFilter.value || 'all';
+    categoryFilter.innerHTML = `<option value="all">Tutte</option>` + optionsHtml;
+    categoryFilter.value = [...categoryFilter.options].some(o => o.value === prevFilterVal) ? prevFilterVal : 'all';
+  }
+
+  function addCustomCategory(label){
+    const baseId = slugify(label);
+    let id = baseId;
+    let suffix = 1;
+    while(CATEGORIES[id]){ id = `${baseId}-${++suffix}`; }
+    const color = CUSTOM_COLOR_POOL[Object.keys(customCategories).length % CUSTOM_COLOR_POOL.length];
+    const info = { label: label.slice(0, 30), color };
+    CATEGORIES[id] = info;
+    customCategories[id] = info;
+    saveCustomCategories();
+    populateCategorySelects();
+    exerciseCategory.value = id;
+  }
+
+  exerciseCategory.addEventListener('change', ()=>{
+    if(exerciseCategory.value === '__new__'){
+      const name = window.prompt('Nome della nuova tipologia (es. "Slide", "Fingerstyle"...)');
+      if(name && name.trim()){
+        addCustomCategory(name.trim());
+      } else {
+        exerciseCategory.value = 'altro';
+      }
+    }
+  });
+
+  function normalizeExercise(ex){
+    const bpmVal = Number(ex.bpm);
+    return {
+      id: ex.id,
+      name: String(ex.name || '').slice(0, 80),
+      date: ex.date || todayISO(),
+      done: !!ex.done,
+      category: (ex.category && CATEGORIES[ex.category]) ? ex.category : 'altro',
+      progress: Number.isInteger(ex.progress) ? Math.max(0, Math.min(5, ex.progress)) : 0,
+      bpm: (Number.isFinite(bpmVal) && bpmVal > 0) ? Math.round(bpmVal) : null
+    };
+  }
 
   function setLogStatus(msg){
     logStatus.textContent = msg;
@@ -1075,6 +1247,7 @@
   let idCounter = 0;
 
   const STORAGE_KEY = 'guitar-practice-exercises';
+  const CATEGORY_STORAGE_KEY = 'guitar-practice-custom-categories';
 
   function saveExercises(){
     try{
@@ -1084,11 +1257,32 @@
     }
   }
 
+  function saveCustomCategories(){
+    try{
+      localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(customCategories));
+    }catch(err){
+      console.error('Impossibile salvare le tipologie personalizzate:', err);
+    }
+  }
+
+  function loadCustomCategories(){
+    try{
+      const raw = localStorage.getItem(CATEGORY_STORAGE_KEY);
+      if(raw){
+        customCategories = JSON.parse(raw);
+        CATEGORIES = { ...BUILTIN_CATEGORIES, ...customCategories };
+      }
+    }catch(err){
+      customCategories = {};
+    }
+    populateCategorySelects();
+  }
+
   function loadExercises(){
     try{
       const raw = localStorage.getItem(STORAGE_KEY);
       if(raw){
-        exercises = JSON.parse(raw);
+        exercises = JSON.parse(raw).map(normalizeExercise);
         idCounter = exercises.reduce((max, e) => Math.max(max, e.id + 1), 0);
       }
     }catch(err){
@@ -1097,12 +1291,20 @@
     renderExercises();
   }
 
+
   function renderExercises(){
     exerciseList.innerHTML = '';
-    emptyHint.style.display = exercises.length ? 'none' : 'block';
+
+    const filterVal = categoryFilter.value;
+    const filtered = filterVal === 'all' ? exercises : exercises.filter(ex => ex.category === filterVal);
+
+    emptyHint.style.display = filtered.length ? 'none' : 'block';
+    emptyHint.textContent = exercises.length
+      ? 'Nessun esercizio con questa tipologia.'
+      : 'Aggiungi il primo esercizio da lavorare in questa sessione.';
 
     // ordina per data (più recenti prima), poi per ordine di inserimento
-    const sorted = [...exercises].sort((a,b) => b.date.localeCompare(a.date) || a.id - b.id);
+    const sorted = [...filtered].sort((a,b) => b.date.localeCompare(a.date) || a.id - b.id);
 
     sorted.forEach(ex => {
       const li = document.createElement('li');
@@ -1123,6 +1325,44 @@
       name.className = 'ex-name';
       name.textContent = ex.name;
 
+      const cat = categoryInfo(ex.category);
+      const badge = document.createElement('span');
+      badge.className = 'ex-badge';
+      badge.textContent = cat.label;
+      badge.style.color = cat.color;
+      badge.style.borderColor = cat.color;
+      badge.style.background = `rgba(${hexToRgb(cat.color)}, 0.16)`;
+
+      const stars = document.createElement('span');
+      stars.className = 'ex-stars';
+      stars.setAttribute('role', 'group');
+      stars.setAttribute('aria-label', 'Progresso su 5');
+      for(let i = 1; i <= 5; i++){
+        const star = document.createElement('button');
+        star.type = 'button';
+        star.className = 'star' + (i <= ex.progress ? ' filled' : '');
+        star.textContent = '★';
+        star.setAttribute('aria-label', `Progresso ${i} su 5`);
+        star.addEventListener('click', ()=>{
+          ex.progress = (ex.progress === i) ? i - 1 : i;
+          renderExercises();
+          saveExercises();
+        });
+        stars.appendChild(star);
+      }
+
+      const bpmBtn = document.createElement('button');
+      bpmBtn.type = 'button';
+      bpmBtn.className = 'ex-bpm-btn' + (ex.bpm ? ' set' : '');
+      bpmBtn.textContent = ex.bpm ? `♩ ${ex.bpm}` : 'Segna tempo';
+      bpmBtn.title = 'Salva il BPM attuale del metronomo per questo esercizio';
+      bpmBtn.addEventListener('click', ()=>{
+        ex.bpm = bpm;
+        renderExercises();
+        saveExercises();
+        setLogStatus(`Tempo ${bpm} BPM salvato per "${ex.name}"`);
+      });
+
       const date = document.createElement('span');
       date.className = 'ex-date';
       date.textContent = formatDateLabel(ex.date);
@@ -1140,10 +1380,20 @@
 
       li.appendChild(check);
       li.appendChild(name);
+      li.appendChild(badge);
+      li.appendChild(stars);
+      li.appendChild(bpmBtn);
       li.appendChild(date);
       li.appendChild(remove);
       exerciseList.appendChild(li);
     });
+
+    if(filtered.length){
+      const avg = filtered.reduce((sum, ex) => sum + ex.progress, 0) / filtered.length;
+      logStats.textContent = `Progresso medio: ${avg.toFixed(1)}/5 su ${filtered.length} esercizi`;
+    } else {
+      logStats.textContent = '';
+    }
   }
 
   exerciseForm.addEventListener('submit', (e)=>{
@@ -1151,13 +1401,16 @@
     const val = exerciseInput.value.trim();
     if(!val) return;
     const dateVal = exerciseDate.value || todayISO();
-    exercises.push({ id: idCounter++, name: val, date: dateVal, done: false });
+    const categoryVal = CATEGORIES[exerciseCategory.value] ? exerciseCategory.value : 'altro';
+    exercises.push({ id: idCounter++, name: val, date: dateVal, done: false, category: categoryVal, progress: 0, bpm: null });
     exerciseInput.value = '';
     exerciseDate.value = todayISO();
     exerciseInput.focus();
     renderExercises();
     saveExercises();
   });
+
+  categoryFilter.addEventListener('change', renderExercises);
 
   exportBtn.addEventListener('click', ()=>{
     if(!exercises.length){
@@ -1195,7 +1448,8 @@
           if(item && typeof item.name === 'string' && typeof item.date === 'string'){
             const key = item.name + '|' + item.date;
             if(!existingKeys.has(key)){
-              exercises.push({ id: idCounter++, name: item.name, date: item.date, done: !!item.done });
+              const norm = normalizeExercise({ id: idCounter++, name: item.name, date: item.date, done: item.done, category: item.category, progress: item.progress, bpm: item.bpm });
+              exercises.push(norm);
               existingKeys.add(key);
               added++;
             }
@@ -1212,6 +1466,7 @@
     reader.readAsText(file);
   });
 
+  loadCustomCategories();
   loadExercises();
 
 })();
