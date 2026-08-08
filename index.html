@@ -187,13 +187,28 @@
     font-family:'JetBrains Mono', monospace;
   }
   .bpm-num{
+    font-family:'JetBrains Mono', monospace;
     font-size:56px;
     font-weight:700;
     line-height:1;
     color:var(--cream);
-    min-width:110px;
+    width:150px;
     text-align:right;
     font-variant-numeric:tabular-nums;
+    background:transparent;
+    border:none;
+    border-bottom:2px solid transparent;
+    padding:0 2px;
+    -moz-appearance:textfield;
+  }
+  .bpm-num::-webkit-inner-spin-button,
+  .bpm-num::-webkit-outer-spin-button{
+    -webkit-appearance:none;
+    margin:0;
+  }
+  .bpm-num:hover, .bpm-num:focus{
+    border-bottom-color:rgba(201,162,39,0.4);
+    outline:none;
   }
   .bpm-unit{
     font-size:13px;
@@ -701,7 +716,7 @@
         </div>
 
         <div class="bpm-readout">
-          <span class="bpm-num" id="bpmNum">100</span>
+          <input type="number" class="bpm-num" id="bpmNum" value="100" min="30" max="240" inputmode="numeric" aria-label="Battiti al minuto (valore esatto)">
           <span class="bpm-unit">bpm</span>
         </div>
       </div>
@@ -848,7 +863,7 @@
   function setBpm(v){
     bpm = Math.max(30, Math.min(240, Math.round(v)));
     bpmSlider.value = bpm;
-    bpmNum.textContent = bpm;
+    bpmNum.value = bpm;
     updateSliderFill();
     updatePendulumSpeed();
   }
@@ -990,6 +1005,25 @@
       pendulumInterval = setInterval(swingPendulum, (60000 / bpm));
     }
   });
+
+  function applyBpmInput(){
+    const v = parseInt(bpmNum.value, 10);
+    if(!isNaN(v)){
+      setBpm(v);
+      if(isPlaying){
+        clearInterval(pendulumInterval);
+        pendulumInterval = setInterval(swingPendulum, (60000 / bpm));
+      }
+    } else {
+      bpmNum.value = bpm;
+    }
+  }
+
+  bpmNum.addEventListener('change', applyBpmInput);
+  bpmNum.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){ applyBpmInput(); bpmNum.blur(); }
+  });
+  bpmNum.addEventListener('blur', applyBpmInput);
 
   sigSelect.addEventListener('change', (e)=>{
     beatsPerBar = parseInt(e.target.value, 10);
